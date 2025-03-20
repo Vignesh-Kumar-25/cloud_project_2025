@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: raft
+  labels:
+    app: raft
+spec:
+  clusterIP: None  # Headless service for stable DNS
+  selector:
+    app: raft
+  ports:
+    - name: raft
+      port: 7010
+    - name: raft-internal
+      port: 7011
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: raft
+spec:
+  serviceName: "raft"
+  replicas: 6  # ✅ Ensures we deploy 6 pods
+  selector:
+    matchLabels:
+      app: raft
+  template:
+    metadata:
+      labels:
+        app: raft
+    spec:
+      containers:
+        - name: raft-node
+          image: my-raft-app:latest  # ✅ Keeps your image name unchanged
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 7010
+            - containerPort: 7011
+            - containerPort: 8000
+          env:
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: ADDR
+              value: "$(NODE_ID).raft.default.svc.cluster.local:7010"
+            - name: ENSEMBLE
+              value: "raft-0.raft.default.svc.cluster.local:7010,raft-1.raft.default.svc.cluster.local:7010,raft-2.raft.default.svc.cluster.local:7010,raft-3.raft.default.svc.cluster.local:7010,raft-4.raft.default.svc.cluster.local:7010,raft-5.raft.default.svc.cluster.local:7010"
