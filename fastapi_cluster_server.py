@@ -5,9 +5,18 @@ import threading
 import logging
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi import Body
 from pydantic import BaseModel
+import json  # To handle vote storage
 
 import requests
+import threading
+
+# Global lock to ensure safe writes to the votes file
+lock = threading.Lock()
+
+# Global dictionary to store votes
+votes = {}
 
 # Import pyraft components
 from pyraft.raft import RaftNode
@@ -24,7 +33,7 @@ NODE_ID = os.getenv("NODE_ID", "1")
 # Kubernetes DNS-based Service Discovery
 RAFT_PORT = int(os.getenv("RAFT_PORT", "7010"))
 RAFT_SERVICE_NAME = os.getenv("RAFT_SERVICE_NAME", "raft")
-RAFT_CLUSTER_SIZE = int(os.getenv("RAFT_CLUSTER_SIZE", "10"))
+RAFT_CLUSTER_SIZE = int(os.getenv("RAFT_CLUSTER_SIZE", "6"))
 
 # Construct the ensemble using Kubernetes DNS resolution
 ensemble = {f"raft-{i}": f"raft-{i}.raft.default.svc.cluster.local:7010" for i in range(RAFT_CLUSTER_SIZE)}
@@ -38,18 +47,77 @@ raft_node = RaftNode(
     ensemble,
     #election_timeout=3.0  # Set election timeout to ensure leader election happens faster
 )
-raft_node.election_timeout = 2
+raft_node.election_timeout = 4
 
 if hasattr(raft_node, 'election_timeout'):
-    raft_node.election_timeout = 2  # Set timeout if supported
+    raft_node.election_timeout = 3  # Set timeout if supported
 else:
     logger.warning("RaftNode does not support election timeout. Skipping...")
 
 # ----------------- FASTAPI SERVER -----------------
 app = FastAPI(title="Raft Cluster API", version="1.0")
 
+
+# ----------------- Voting -----------------
+VOTES_FILE = "votes.json"
+
+def load_votes():
+    """Load votes from JSON file."""
+    if not os.path.exists(VOTES_FILE):
+        return {}
+    with open(VOTES_FILE, "r") as f:
+        return json.load(f)
+
+def save_votes(votes):
+    """Save votes to JSON file."""
+    with open(VOTES_FILE, "w") as f:
+        json.dump(votes, f, indent=4)
+
+
+class VoteRequest(BaseModel):
+    user: str
+    candidate: str
+
+@app.post("/vote")
+def vote(request: dict = Body(...)):
+    """Handles voting. The leader node records the vote."""
+    global votes  # Ensure we are modifying the global dictionary
+
+    # Check if this node is the leader
+    if raft_node.state != 'l':
+        leader_response = get_leader()
+        leader = leader_response.get("leader")
+        
+        if leader is None:
+            raise HTTPException(status_code=503, detail="Leader unavailable, try again later.")
+
+        leader_url = f"http://{ensemble[leader].split(':')[0]}:8000/vote"
+
+        # Forward request to leader
+        try:
+            response = requests.post(leader_url, json=request, timeout=2)
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            raise HTTPException(status_code=503, detail=f"Failed to forward vote to leader: {str(e)}")
+
+    # Append the vote to the dictionary
+    candidate = request["candidate"]
+    votes[candidate] = votes.get(candidate, 0) + 1
+
+    return {"message": f"Vote cast for {candidate}", "votes": votes}
+
+
+
+
 class AppendRequest(BaseModel):
     command: list  # Example: ["set", "key", "value"]
+
+@app.get("/results")
+def get_results():
+    """Returns the current voting results."""
+    return {"votes": votes}
+
+
 
 @app.get("/node/status")
 def node_status():
@@ -93,7 +161,9 @@ def append_entry(req: AppendRequest):
         # Force election if no leader is found
         if not any(node for node in ensemble if raft_node.state == 'l'):
             logger.warning("⚠️ No leader detected! Forcing election...")
-            raft_node.start_election()
+            # Force an election by resetting election timeout
+            raft_node.election_timeout = 4  # Force quick re-election
+
 
         raise HTTPException(status_code=400, detail="Not the leader; cannot append entry.")
     
@@ -139,9 +209,11 @@ def monitor_leader():
         leader = leader_response.get("leader")
 
         if leader is None:
-            logger.warning("Leader is down! Triggering immediate election...")
-            raft_node.start_election()
-            time.sleep(1)  # Give time for election
+            logger.warning("🚨 Leader is missing! Adjusting timeout to force election...")
+            try:
+                raft_node.election_timeout = 4  # Reduce timeout to trigger election
+            except Exception as e:
+                logger.error(f"⚠️ Election trigger failed: {e}")
         elif leader != last_leader:
             last_leader = leader
             logger.info(f"New Leader Elected: {leader}")

@@ -3,10 +3,11 @@ kind: Service
 metadata:
   name: raft-fastapi
 spec:
-  type: LoadBalancer  # Change to ClusterIP if running inside a local cluster
+  type: NodePort  # Change from LoadBalancer to NodePort
   selector:
     app: raft
   ports:
     - protocol: TCP
-      port: 8000  # Exposes FastAPI service externally
-      targetPort: 8000
+      port: 8000  # Cluster-wide port
+      targetPort: 8000  # The container's port
+      nodePort: 30080  # Exposes service on this port (adjustable if needed)
