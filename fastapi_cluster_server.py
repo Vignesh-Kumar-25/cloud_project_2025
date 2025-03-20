@@ -58,15 +58,62 @@ else:
 app = FastAPI(title="Raft Cluster API", version="1.0")
 
 
+# Ensure the directory exists before writing to files
+DATA_DIR = "/app/data"
+
+def ensure_data_directory():
+    """Ensure that the data directory exists before using it."""
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR, exist_ok=True)
+
+# Call this function at the start of the script
+ensure_data_directory()
+
+def ensure_file_exists(file_path, default_content="{}"):
+    """Ensure the specified file exists, creating it if necessary."""
+    if not os.path.exists(file_path):
+        with open(file_path, "w") as f:
+            f.write(default_content) 
+
 # ----------------- Voting -----------------
-VOTES_FILE = "votes.json"
+VOTERS_FILE = os.path.join(DATA_DIR, "voters.txt")
+RESULTS_FILE = os.path.join(DATA_DIR, "results.txt")
+VOTES_FILE = os.path.join(DATA_DIR, "votes.json")
+
+
+def log_vote(user, candidate):
+    """Log individual vote details into voters.txt, ensuring the file exists first."""
+    ensure_file_exists(VOTERS_FILE, "")  # ✅ Ensure file exists before writing
+    with open(VOTERS_FILE, "a") as f:
+        f.write(f"{user} voted for {candidate}\n")
+
+
+def save_results(vote_counts):
+    """Save vote counts to results file."""
+    with open(RESULTS_FILE, "w") as f:
+        json.dump(vote_counts, f, indent=4)
+
+def load_results():
+    """Load vote counts from the results file."""
+    ensure_file_exists(RESULTS_FILE, "{}")  # ✅ Ensure file exists before reading
+    with open(RESULTS_FILE, "r") as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return {}
+
 
 def load_votes():
-    """Load votes from JSON file."""
-    if not os.path.exists(VOTES_FILE):
-        return {}
+    """Load votes from JSON file, ensuring persistence across restarts."""
+    ensure_file_exists(VOTES_FILE, "{}")  # ✅ Ensure file exists before reading
     with open(VOTES_FILE, "r") as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return {}
+
+# Load votes at startup
+votes = load_results()
 
 def save_votes(votes):
     """Save votes to JSON file."""
@@ -81,7 +128,7 @@ class VoteRequest(BaseModel):
 @app.post("/vote")
 def vote(request: dict = Body(...)):
     """Handles voting. The leader node records the vote."""
-    global votes  # Ensure we are modifying the global dictionary
+    global votes
 
     # Check if this node is the leader
     if raft_node.state != 'l':
@@ -100,11 +147,19 @@ def vote(request: dict = Body(...)):
         except requests.exceptions.RequestException as e:
             raise HTTPException(status_code=503, detail=f"Failed to forward vote to leader: {str(e)}")
 
-    # Append the vote to the dictionary
+    # If leader, process the vote
     candidate = request["candidate"]
+    votes = load_results()
     votes[candidate] = votes.get(candidate, 0) + 1
 
+    # Save updated results
+    with lock:
+        log_vote(request["user"], candidate)  # Save voter details
+        save_results(votes)  # Save vote count
+
     return {"message": f"Vote cast for {candidate}", "votes": votes}
+
+
 
 
 
@@ -115,7 +170,14 @@ class AppendRequest(BaseModel):
 @app.get("/results")
 def get_results():
     """Returns the current voting results."""
-    return {"votes": votes}
+    try:
+        return {"votes": load_results()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching results: {str(e)}")
+
+
+
+
 
 
 
@@ -136,23 +198,29 @@ def get_status():
 
 @app.get("/node/log")
 def node_log():
-    """Retrieves the log entries of the node"""
+    """Retrieves the log entries of the node and reconstructs votes from logs."""
+    global votes
+
     try:
         start_index = raft_node.log.start_index()
         log_entries = raft_node.log.get_range(start_index)
-        decoded = []
+
+        # Rebuild votes from Raft logs
+        reconstructed_votes = {}
         for item in log_entries:
-            cmd = [token.decode('utf-8', errors='replace') if isinstance(token, bytes) else str(token) for token in item.cmd]
-            decoded.append({
-                "term": item.term,
-                "index": item.index,
-                "timestamp": item.ts,
-                "worker_offset": item.worker_offset,
-                "command": cmd
-            })
-        return {"log": decoded}
+            cmd = item.cmd
+            if cmd[0] == "vote":
+                user, candidate = cmd[1], cmd[2]
+                reconstructed_votes[candidate] = reconstructed_votes.get(candidate, 0) + 1
+
+        # Replace current votes with reconstructed votes
+        votes = reconstructed_votes
+
+        return {"log": log_entries, "votes": votes}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @app.post("/node/append")
 def append_entry(req: AppendRequest):
@@ -216,7 +284,9 @@ def monitor_leader():
                 logger.error(f"⚠️ Election trigger failed: {e}")
         elif leader != last_leader:
             last_leader = leader
-            logger.info(f"New Leader Elected: {leader}")
+            logger.info("🔄 Restoring votes from disk after leader change...")
+            global votes
+            votes = load_results()
 
 if __name__ == "__main__":
     start_raft_node()

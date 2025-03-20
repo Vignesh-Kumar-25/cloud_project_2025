@@ -1,0 +1,10 @@
+volumeClaimTemplates:
+  - metadata:
+      name: votes-storage
+    spec:
+      accessModes:
+        - ReadWriteMany  # ✅ Allows multiple pods to share the storage
+      resources:
+        requests:
+          storage: 1Gi
+      storageClassName: standard  # ✅ Ensure it matches your cluster storage class

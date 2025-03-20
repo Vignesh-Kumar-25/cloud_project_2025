@@ -1,7 +1,7 @@
 ### *Step-by-Step Guide to Set Up and Run the Raft Cluster on a New Device*
 ---
 
-### *🛠 Prerequisites (Ensure These Are Installed)*
+### Prerequisites (Ensure These Are Installed)*
 Before running the commands, ensure the new device has:
 - *Docker*
 - *Kubernetes (kubectl)*
@@ -12,13 +12,13 @@ Before running the commands, ensure the new device has:
 If any of these are missing, install them first.
 
 ---
-## *🚀 Step 1: unzip*
+##  Step 1: unzip*
 unzip cloud_project.zip
 
 
 ---
 
-## *🐳 Step 2: Start & Configure Minikube*
+## Step 2: Start & Configure Minikube*
 bash
 minikube start --driver=docker  # Start Minikube cluster
 minikube status  # Ensure Minikube is running
@@ -26,7 +26,7 @@ minikube status  # Ensure Minikube is running
 
 ---
 
-## *📦 Step 3: Build & Load Docker Image in Minikube*
+##  Step 3: Build & Load Docker Image in Minikube*
 Since Kubernetes will pull the image from Minikube's internal Docker registry, run:
 bash
 eval $(minikube docker-env) 
@@ -40,7 +40,7 @@ docker images | grep my-raft-app
 
 ---
 
-## *📝 Step 4: Apply Kubernetes YAML Configurations*
+## Step 4: Apply Kubernetes YAML Configurations*
 Navigate to the yamls/ directory:
 bash
 cd yamls
@@ -61,7 +61,7 @@ kubectl get services  # Ensure services are correctly deployed
 
 ---
 
-## *🌍 Step 5: Port Forward to Access the API*
+##  Step 5: Port Forward to Access the API*
 bash
 kubectl port-forward svc/raft-fastapi 8000:8000
 
@@ -73,7 +73,7 @@ curl http://localhost:8000/status
 
 ---
 
-## *📡 Step 6: Check Cluster Node Status*
+##  Step 6: Check Cluster Node Status*
 Run this to verify which nodes are available and which one is the *leader*:
 bash
 kubectl exec -it raft-0 -- curl http://localhost:8000/status
@@ -88,7 +88,7 @@ You should see one of them having "is_leader": true.
 
 ---
 
-## *🛠️ Step 7: Test Leadership Election*
+##  Step 7: Test Leadership Election*
 To *delete the leader and trigger re-election, first **identify the leader*, then delete it:
 bash
 kubectl delete pod <leader-pod-name>
@@ -98,10 +98,16 @@ bash
 kubectl get pods
 kubectl exec -it raft-0 -- curl http://localhost:8000/status
 
+---
+
+##  Step 8: Test voting*
+
+kubectl exec -it <Pod name> -- curl -X POST "http://localhost:8000/vote" -H "Content-Type: application/json" -d '{"user": "Aa", "candidate": "Bruh"}'
+kubectl exec -it <Pod name> -- curl http://localhost:8000/results
 
 ---
 
-## *🛑 Step 8: Shut Down Everything (Optional)*
+##  Step 9: Shut Down Everything (Optional)*
 If needed, tear down Minikube and Kubernetes resources:
 bash
 kubectl delete -f raft-statefulset.yaml
