@@ -108,3 +108,6 @@ kubectl delete -f raft-fastapi-service.yaml
 minikube stop
 minikube delete
 ```
+
+## **Reference Material**
+[In Search of an Understandable Consensus Algorithm](https://raft.github.io/raft.pdf)
