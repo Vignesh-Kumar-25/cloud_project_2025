@@ -89,16 +89,24 @@ kubectl exec -it <pod-name-any> -- curl http://localhost:8000/leader
 
 ## **Voting System**
 
+Send a POST request to cast a vote
 ```bash
 kubectl exec -it <leader-pod-name> -- curl -X POST "http://localhost:8000/vote" -H "Content-Type: application/json" -d '{"user": "Alice", "candidate": "Bob"}'
-
-
-kubectl exec -it <pod-name> -- curl http://localhost:8000/results
 ```
 
+View the votes results
+```bash
+kubectl exec -it <pod-name> -- curl http://localhost:8000/results
+```
 ---
 
 ##  **Step 9: Shut Down Everything *(Optional)***
+
+Restart all pods
+```bash
+kubectl delete pod -l app=raft
+```
+
 If needed, tear down Minikube and Kubernetes resources:
 
 ```bash
