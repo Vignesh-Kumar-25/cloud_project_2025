@@ -7,7 +7,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi import Body
 from pydantic import BaseModel
-import json  # To handle vote storage
+import json  
 
 import requests
 import threading
@@ -83,7 +83,7 @@ VOTES_FILE = os.path.join(DATA_DIR, "votes.json")
 
 def log_vote(user, candidate):
     """Log individual vote details into voters.txt, ensuring the file exists first."""
-    ensure_file_exists(VOTERS_FILE, "")  # ✅ Ensure file exists before writing
+    ensure_file_exists(VOTERS_FILE, "")  # Ensure file exists before writing
     with open(VOTERS_FILE, "a") as f:
         f.write(f"{user} voted for {candidate}\n")
 
@@ -95,7 +95,7 @@ def save_results(vote_counts):
 
 def load_results():
     """Load vote counts from the results file."""
-    ensure_file_exists(RESULTS_FILE, "{}")  # ✅ Ensure file exists before reading
+    ensure_file_exists(RESULTS_FILE, "{}")  # Ensure file exists before reading
     with open(RESULTS_FILE, "r") as f:
         try:
             return json.load(f)
@@ -105,7 +105,7 @@ def load_results():
 
 def load_votes():
     """Load votes from JSON file, ensuring persistence across restarts."""
-    ensure_file_exists(VOTES_FILE, "{}")  # ✅ Ensure file exists before reading
+    ensure_file_exists(VOTES_FILE, "{}")  # Ensure file exists before reading
     with open(VOTES_FILE, "r") as f:
         try:
             return json.load(f)
@@ -159,11 +159,6 @@ def vote(request: dict = Body(...)):
 
     return {"message": f"Vote cast for {candidate}", "votes": votes}
 
-
-
-
-
-
 class AppendRequest(BaseModel):
     command: list  # Example: ["set", "key", "value"]
 
@@ -176,11 +171,6 @@ def get_results():
         raise HTTPException(status_code=500, detail=f"Error fetching results: {str(e)}")
 
 
-
-
-
-
-
 @app.get("/node/status")
 def node_status():
     """Returns the status of the current Raft node"""
@@ -191,10 +181,12 @@ def node_status():
         "is_leader": (raft_node.state == 'l')
     }
 
+
 @app.get("/status")
 def get_status():
     """Alias for node status"""
     return node_status()
+
 
 @app.get("/node/log")
 def node_log():
@@ -221,14 +213,13 @@ def node_log():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
 @app.post("/node/append")
 def append_entry(req: AppendRequest):
     """Appends a new entry to the log if this node is the leader"""
     if raft_node.state != 'l':
         # Force election if no leader is found
         if not any(node for node in ensemble if raft_node.state == 'l'):
-            logger.warning("⚠️ No leader detected! Forcing election...")
+            logger.warning("No leader detected! Forcing election...")
             # Force an election by resetting election timeout
             raft_node.election_timeout = 4  # Force quick re-election
 
@@ -242,6 +233,7 @@ def append_entry(req: AppendRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/leader")
 def get_leader():
     """Returns the current leader node."""
@@ -254,9 +246,10 @@ def get_leader():
                 if data.get("is_leader"):
                     return {"leader": node_id}
         except requests.exceptions.RequestException as e:
-            logger.warning(f"❌ Failed to connect to {node_id} ({node_url}): {e}")
+            logger.warning(f"Failed to connect to {node_id} ({node_url}): {e}")
             continue  # Skip unreachable nodes
     return {"leader": None}
+
 
 # ----------------- THREAD MANAGEMENT -----------------
 def start_raft_node():
@@ -277,14 +270,14 @@ def monitor_leader():
         leader = leader_response.get("leader")
 
         if leader is None:
-            logger.warning("🚨 Leader is missing! Adjusting timeout to force election...")
+            logger.warning("Leader is missing! Adjusting timeout to force election...")
             try:
                 raft_node.election_timeout = 4  # Reduce timeout to trigger election
             except Exception as e:
-                logger.error(f"⚠️ Election trigger failed: {e}")
+                logger.error(f"Election trigger failed: {e}")
         elif leader != last_leader:
             last_leader = leader
-            logger.info("🔄 Restoring votes from disk after leader change...")
+            logger.info("Restoring votes from disk after leader change...")
             global votes
             votes = load_results()
 
